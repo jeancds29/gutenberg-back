@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 load_dotenv()
 
 
-DATABASE_URL = os.environ.get("DATABASE_URL")
+DATABASE_URL = os.environ.get("DATABASE_URL") or os.getenv("DATABASE_URL")
 
 
 if DATABASE_URL:

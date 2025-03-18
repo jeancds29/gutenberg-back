@@ -1,0 +1,1 @@
+web: python debug.py && python -m main 

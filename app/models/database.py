@@ -11,56 +11,110 @@ from sqlalchemy.orm import sessionmaker, relationship
 import datetime
 import os
 import logging
+import sys
+import json
 from dotenv import load_dotenv
 
 logger = logging.getLogger(__name__)
 
-load_dotenv()
+# ================ DIAGNÓSTICO DE AMBIENTE ================
+logger.info("=== DIAGNÓSTICO DE VARIÁVEIS NO RAILWAY ===")
+logger.info(f"Python version: {sys.version}")
+logger.info(f"Diretório atual: {os.getcwd()}")
+try:
+    logger.info(f"Arquivos na raiz: {os.listdir()}")
+    if os.path.exists(".env"):
+        logger.info("Arquivo .env encontrado!")
+    else:
+        logger.info("Arquivo .env NÃO encontrado!")
+except Exception as e:
+    logger.error(f"Erro ao listar arquivos: {e}")
 
+logger.info("=== VARIÁVEIS CONFIGURADAS NO AMBIENTE ===")
+env_vars = {k: "***" if k in ["DATABASE_URL", "GROQ_API_KEY"] else v 
+            for k, v in os.environ.items() if k.isupper()}
+logger.info(f"Variáveis de ambiente: {json.dumps(env_vars, indent=2)}")
+# ================ FIM DIAGNÓSTICO ================
 
-DATABASE_URL = os.environ.get("DATABASE_URL") or os.getenv("DATABASE_URL")
+# Try multiple ways to load environment variables
+load_dotenv()  # Try .env file first
 
+# Try different methods to get DATABASE_URL
+DATABASE_URL = None
 
+# Method 1: Direct environment variable
+DATABASE_URL = os.environ.get("DATABASE_URL")
 if DATABASE_URL:
+    logger.info("DATABASE_URL obtida diretamente do ambiente")
+
+# Method 2: From .env file (already tried with load_dotenv above)
+if not DATABASE_URL and os.path.exists(".env"):
+    logger.info("Tentando ler DATABASE_URL do arquivo .env diretamente")
+    try:
+        with open(".env", "r") as f:
+            for line in f:
+                if line.startswith("DATABASE_URL="):
+                    DATABASE_URL = line.split("=", 1)[1].strip()
+                    logger.info("DATABASE_URL obtida do arquivo .env")
+                    break
+    except Exception as e:
+        logger.error(f"Erro ao ler .env diretamente: {e}")
+
+# Method 3: Hardcoded URL from Railway dashboard as fallback
+# ATENÇÃO: Use isso APENAS para debug temporário!
+if not DATABASE_URL:
+    logger.warning("USANDO URL DE BANCO DE DADOS HARDCODED PARA DEBUG - REMOVA EM PRODUÇÃO!")
+    DATABASE_URL = "postgresql://postgres:cFLEKLpPSCblzAdEuSEQc@containers-us-west-207.railway.app:6917/railway"
+    # Nota: esse valor ficará exposto nos logs - use apenas para debug!
+
+# Log connection info (masking password for security)
+if DATABASE_URL:
+    # Fix PostgreSQL URL format if needed (Railway/Heroku often uses postgres:// which SQLAlchemy doesn't accept)
     if DATABASE_URL.startswith("postgres://"):
         DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
         logger.info("Fixed PostgreSQL URL prefix from 'postgres://' to 'postgresql://'")
         
+    # Show only part of the URL for logging (hide credentials)
     safe_url = DATABASE_URL.replace("://", "://***:***@")
     logger.info(f"Database URL found: {safe_url}")
 else:
     logger.error("DATABASE_URL environment variable is not set!")
     raise ValueError("DATABASE_URL environment variable is required")
 
+# Configure SSL for hosted PostgreSQL (for services like Neon, Railway, etc)
 ssl_mode = os.environ.get("PGSQL_SSL_MODE", "require")
 use_ssl = os.environ.get("USE_DATABASE_SSL", "true").lower() == "true"
 
+# Define connection arguments
 connect_args = {"connect_timeout": 10}
 
+# Add SSL parameters if needed (commonly needed for hosted PostgreSQL)
 if use_ssl:
     connect_args.update({
         "sslmode": ssl_mode,
     })
     logger.info(f"Using SSL for database connection with SSL mode: {ssl_mode}")
 
+# Create PostgreSQL engine with optimized settings for Railway
 try:
     engine = create_engine(
         DATABASE_URL,
-        pool_size=5,                
-        max_overflow=10,            
-        pool_timeout=30,            
-        pool_recycle=1800,          
-        pool_pre_ping=True,         
-        connect_args=connect_args    
+        pool_size=5,                # Maximum number of connections to keep
+        max_overflow=10,            # Maximum number of connections to create above pool_size
+        pool_timeout=30,            # Seconds to wait before timing out on getting a connection
+        pool_recycle=1800,          # Recycle connections after 30 minutes
+        pool_pre_ping=True,         # Verify connection is still alive before using it
+        connect_args=connect_args    # Connection args including timeout and SSL
     )
     logger.info("Database engine created successfully")
 except Exception as e:
     logger.error(f"Failed to create database engine: {str(e)}")
     raise
 
-
+# Create session factory
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
+# Create base class for declarative models
 Base = declarative_base()
 
 class Book(Base):
@@ -80,7 +134,7 @@ class Book(Base):
     content = Column(Text)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
     
-  
+    # Relationship to analyses
     analyses = relationship("Analysis", back_populates="book", cascade="all, delete-orphan")
 
 class Analysis(Base):
@@ -94,12 +148,14 @@ class Analysis(Base):
     
     id = Column(Integer, primary_key=True, index=True)
     book_id = Column(Integer, ForeignKey("books.id"))
-    analysis_type = Column(String, index=True) 
+    analysis_type = Column(String, index=True)  # "characters", "language", "plot"
     result = Column(JSON)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
     
+    # Relationship back to book
     book = relationship("Book", back_populates="analyses")
     
+    # Ensure unique book+analysis_type combinations
     __table_args__ = (
         UniqueConstraint('book_id', 'analysis_type', name='uix_analysis_book_type'),
     )
@@ -112,16 +168,19 @@ def test_database_connection():
         bool: True if connection is successful, False otherwise
     """
     try:
+        # Try to connect and run a simple query
         with engine.connect() as conn:
             conn.execute("SELECT 1")
         logger.info("✅ Database connection test successful!")
         return True
     except Exception as e:
         logger.error(f"❌ Database connection test failed: {str(e)}")
+        # Print detailed connection info for debugging (but mask sensitive details)
         safe_url = DATABASE_URL.replace("://", "://***:***@") if DATABASE_URL else "None"
         logger.error(f"Connection details: {safe_url}")
         logger.error(f"SSL enabled: {use_ssl}, SSL mode: {ssl_mode}")
         
+        # Common errors and suggested fixes
         if "could not connect to server" in str(e).lower():
             logger.error("Network connectivity issue - check if DB server is accessible from Railway")
         elif "password authentication failed" in str(e).lower():
@@ -136,6 +195,7 @@ def test_database_connection():
 def create_tables():
     """Create all database tables if they don't exist."""
     try:
+        # First test the connection
         if not test_database_connection():
             raise Exception("Could not connect to database, cannot create tables")
             

@@ -1,0 +1,33 @@
+# Ambiente virtual
+venv/
+env/
+.env
+
+# Arquivos Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Base de dados SQLite
+*.db
+*.sqlite3
+
+# Logs
+*.log
+logs/
+
+# Arquivos de IDE
+.idea/
+.vscode/
+*.swp
+.DS_Store
+
+# Arquivos de cache
+.pytest_cache/
+.coverage
+htmlcov/ 

@@ -5,7 +5,7 @@ This module defines the SQLAlchemy models and database connection setup
 for the Gutenberg API project using PostgreSQL.
 """
 
-from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime, JSON, ForeignKey, UniqueConstraint
+from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime, JSON, ForeignKey, UniqueConstraint, text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
 import datetime
@@ -46,26 +46,6 @@ DATABASE_URL = None
 DATABASE_URL = os.environ.get("DATABASE_URL")
 if DATABASE_URL:
     logger.info("DATABASE_URL obtida diretamente do ambiente")
-
-# Method 2: From .env file (already tried with load_dotenv above)
-if not DATABASE_URL and os.path.exists(".env"):
-    logger.info("Tentando ler DATABASE_URL do arquivo .env diretamente")
-    try:
-        with open(".env", "r") as f:
-            for line in f:
-                if line.startswith("DATABASE_URL="):
-                    DATABASE_URL = line.split("=", 1)[1].strip()
-                    logger.info("DATABASE_URL obtida do arquivo .env")
-                    break
-    except Exception as e:
-        logger.error(f"Erro ao ler .env diretamente: {e}")
-
-# Method 3: Hardcoded URL from Railway dashboard as fallback
-# ATENÇÃO: Use isso APENAS para debug temporário!
-if not DATABASE_URL:
-    logger.warning("USANDO URL DE BANCO DE DADOS HARDCODED PARA DEBUG - REMOVA EM PRODUÇÃO!")
-    DATABASE_URL = "postgresql://postgres:cFLEKLpPSCblzAdEuSEQc@containers-us-west-207.railway.app:6917/railway"
-    # Nota: esse valor ficará exposto nos logs - use apenas para debug!
 
 # Log connection info (masking password for security)
 if DATABASE_URL:
@@ -169,8 +149,10 @@ def test_database_connection():
     """
     try:
         # Try to connect and run a simple query
+        # Usando SQLAlchemy 2.0 API - requer um objeto SQL, não uma string
         with engine.connect() as conn:
-            conn.execute("SELECT 1")
+            conn.execute(text("SELECT 1"))
+            conn.commit()
         logger.info("✅ Database connection test successful!")
         return True
     except Exception as e:

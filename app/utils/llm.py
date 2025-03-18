@@ -12,14 +12,26 @@ from dotenv import load_dotenv
 import logging
 import re
 import json
+import sys
 
 logger = logging.getLogger(__name__)
 
 load_dotenv()
 
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-client = Groq(api_key=GROQ_API_KEY)
-model = "llama3-70b-8192"  
+api_key = os.environ.get("GROQ_API_KEY")
+client = None
+if api_key:
+    try:
+        client = Groq(api_key=api_key)
+        logger.info("Cliente Groq inicializado com sucesso")
+    except Exception as e:
+        logger.error(f"Falha ao inicializar o cliente Groq: {str(e)}")
+        client = None
+else:
+    logger.warning("GROQ_API_KEY não encontrada. Os recursos de análise de texto não estarão disponíveis.")
+
+model = os.environ.get("GROQ_MODEL", "llama3-70b-8192")
+logger.info(f"Usando o modelo Groq: {model}")
 
 def extract_json_from_response(content):
     """

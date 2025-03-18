@@ -9,43 +9,22 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import os
 import logging
-import sys
+
+from app.routers import books, analysis
+from app.models.database import create_tables
 
 logging.basicConfig(
-    level=logging.DEBUG,
+    level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
-
-database_url = os.environ.get("DATABASE_URL")
-groq_api_key = os.environ.get("GROQ_API_KEY")
-
-if not database_url:
-    logger.critical("DATABASE_URL environment variable is not set! Application will likely fail.")
-else:
-    safe_url = database_url.replace("://", "://***:***@")
-    logger.info(f"DATABASE_URL found: {safe_url}")
-
-if not groq_api_key:
-    logger.warning("GROQ_API_KEY environment variable is not set! Text analysis features will not work.")
-else:
-    logger.info("GROQ_API_KEY found and configured")
-
-from app.routers import books, analysis
-from app.models.database import create_tables, test_database_connection
-
-logger.info("Testing database connection...")
-if not test_database_connection():
-    logger.critical("Failed to connect to the database. Exiting application.")
-    sys.exit(1)
 
 logger.info("Initializing database...")
 try:
     create_tables()
     logger.info("Database initialized successfully")
 except Exception as e:
-    logger.critical(f"Failed to initialize database: {str(e)}")
-    raise
+    logger.error(f"Error initializing database: {str(e)}")
 
 app = FastAPI(
     title="Gutenberg API",
@@ -72,14 +51,7 @@ async def root():
 @app.get("/api/health")
 async def health_check():
     """Health check endpoint for monitoring."""
-    db_connected = test_database_connection()
-    status = "ok" if db_connected else "database_error"
-    
-    return {
-        "status": status,
-        "database": "connected" if db_connected else "disconnected",
-        "api": "ok"
-    }
+    return {"status": "ok"}
 
 if __name__ == "__main__":
     import uvicorn

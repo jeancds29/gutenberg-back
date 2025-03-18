@@ -39,7 +39,6 @@ class BookDetail(BookResponse):
 class AnalysisRequest(BaseModel):
     """Schema for requesting a text analysis."""
     book_id: str
-    analysis_type: str  
 
 class Character(BaseModel):
     """Schema for a book character."""

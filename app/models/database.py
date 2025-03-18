@@ -17,10 +17,47 @@ logger = logging.getLogger(__name__)
 
 load_dotenv()
 
-SQLALCHEMY_DATABASE_URL = os.getenv("DATABASE_URL")
 
-logger.info("Connecting to database...")
-engine = create_engine(SQLALCHEMY_DATABASE_URL)
+DATABASE_URL = os.environ.get("DATABASE_URL")
+
+
+if DATABASE_URL:
+    if DATABASE_URL.startswith("postgres://"):
+        DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
+        logger.info("Fixed PostgreSQL URL prefix from 'postgres://' to 'postgresql://'")
+        
+    safe_url = DATABASE_URL.replace("://", "://***:***@")
+    logger.info(f"Database URL found: {safe_url}")
+else:
+    logger.error("DATABASE_URL environment variable is not set!")
+    raise ValueError("DATABASE_URL environment variable is required")
+
+ssl_mode = os.environ.get("PGSQL_SSL_MODE", "require")
+use_ssl = os.environ.get("USE_DATABASE_SSL", "true").lower() == "true"
+
+connect_args = {"connect_timeout": 10}
+
+if use_ssl:
+    connect_args.update({
+        "sslmode": ssl_mode,
+    })
+    logger.info(f"Using SSL for database connection with SSL mode: {ssl_mode}")
+
+try:
+    engine = create_engine(
+        DATABASE_URL,
+        pool_size=5,                
+        max_overflow=10,            
+        pool_timeout=30,            
+        pool_recycle=1800,          
+        pool_pre_ping=True,         
+        connect_args=connect_args    
+    )
+    logger.info("Database engine created successfully")
+except Exception as e:
+    logger.error(f"Failed to create database engine: {str(e)}")
+    raise
+
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
@@ -43,6 +80,7 @@ class Book(Base):
     content = Column(Text)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
     
+  
     analyses = relationship("Analysis", back_populates="book", cascade="all, delete-orphan")
 
 class Analysis(Base):
@@ -56,7 +94,7 @@ class Analysis(Base):
     
     id = Column(Integer, primary_key=True, index=True)
     book_id = Column(Integer, ForeignKey("books.id"))
-    analysis_type = Column(String, index=True)  
+    analysis_type = Column(String, index=True) 
     result = Column(JSON)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
     
@@ -66,9 +104,41 @@ class Analysis(Base):
         UniqueConstraint('book_id', 'analysis_type', name='uix_analysis_book_type'),
     )
 
+def test_database_connection():
+    """
+    Test the database connection.
+    
+    Returns:
+        bool: True if connection is successful, False otherwise
+    """
+    try:
+        with engine.connect() as conn:
+            conn.execute("SELECT 1")
+        logger.info("✅ Database connection test successful!")
+        return True
+    except Exception as e:
+        logger.error(f"❌ Database connection test failed: {str(e)}")
+        safe_url = DATABASE_URL.replace("://", "://***:***@") if DATABASE_URL else "None"
+        logger.error(f"Connection details: {safe_url}")
+        logger.error(f"SSL enabled: {use_ssl}, SSL mode: {ssl_mode}")
+        
+        if "could not connect to server" in str(e).lower():
+            logger.error("Network connectivity issue - check if DB server is accessible from Railway")
+        elif "password authentication failed" in str(e).lower():
+            logger.error("Authentication failed - check username/password")
+        elif "does not exist" in str(e).lower():
+            logger.error("Database does not exist - check database name")
+        elif "ssl" in str(e).lower():
+            logger.error("SSL issue - try setting USE_DATABASE_SSL=false if your provider doesn't support SSL")
+        
+        return False
+
 def create_tables():
     """Create all database tables if they don't exist."""
     try:
+        if not test_database_connection():
+            raise Exception("Could not connect to database, cannot create tables")
+            
         logger.info("Creating database tables if they don't exist...")
         Base.metadata.create_all(bind=engine)
         logger.info("Database tables successfully created/verified")
